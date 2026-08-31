@@ -1,0 +1,49 @@
+3. 在下面的大编辑框里，**全选删掉默认内容**，粘贴下面这段（选中复制即可）：
+
+```yaml
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Checkout Theos
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          ref: master
+          submodules: recursive
+          path: theos
+
+      - name: Checkout iOS SDK
+        uses: actions/checkout@v4
+        with:
+          repository: theos/sdks
+          sparse-checkout: iPhoneOS14.5.sdk
+          path: theos/sdks
+
+      - name: Install dependencies
+        run: brew install make xz ldid
+
+      - name: Build package (rootful)
+        run: |
+          export THEOS=$PWD/theos
+          gmake clean package FINALPACKAGE=1
+
+      - name: Build package (rootless)
+        run: |
+          export THEOS=$PWD/theos
+          gmake clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: packages/*.deb
