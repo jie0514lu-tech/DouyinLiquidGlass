@@ -4,7 +4,7 @@
 # 打包成 rootless（Dopamine/palera1n 等新越狱）：
 #   make clean && make package THEOS_PACKAGE_SCHEME=rootless
 
-export TARGET ?= iphone:clang:16.5:14.0
+export TARGET ?= iphone:clang:latest:14.0
 export ARCHS ?= arm64 arm64e
 
 export DEBUG ?= 0
