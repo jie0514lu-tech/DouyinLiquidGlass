@@ -1,0 +1,9 @@
+Package: com.dy.liquidglass
+Name: Douyin Liquid Glass
+Version: 0.1.0
+Architecture: iphoneos-arm
+Description: 抖音 App 内液态玻璃（借鉴 LiquidAss 思路：磨砂玻璃+高光+圆角）
+Maintainer: you
+Author: you
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 14.0), preferenceloader
