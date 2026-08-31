@@ -19,5 +19,6 @@ DouyinLiquidGlass_FRAMEWORKS = UIKit QuartzCore CoreGraphics
 
 include $(THEOS)/makefiles/tweak.mk
 
-SUBPROJECTS += Prefs
+# 设置面板（下一版再加回；当前先只编核心 tweak，降低编译风险）
+#SUBPROJECTS += Prefs
 include $(THEOS_MAKE_PATH)/aggregate.mk

@@ -29,6 +29,7 @@ static id DYCAFilterWithType(NSString *type) {
     CAGradientLayer   *_specular;
     CAGradientLayer   *_specularBoost;
     CALayer           *_specularMask;
+    CALayer           *_specularBoostMask;
     BOOL               _backdropConfigured;
     BOOL               _filterAttached;
 }

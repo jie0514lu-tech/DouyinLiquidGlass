@@ -12,7 +12,6 @@
 #endif
 #endif
 
-static NSString *const kPrefsDomain = @"com.dy.liquidglass";
 static CFStringRef const kReloadNote = CFSTR("com.dy.liquidglass/Reload");
 
 static NSDictionary<NSString *, id> *sCache;
