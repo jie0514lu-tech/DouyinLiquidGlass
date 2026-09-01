@@ -123,6 +123,17 @@ BOOL DYHeuristicBottomBar(UIView *view) {
     return fabs(CGRectGetMaxY(wf) - winH) < 60.0;
 }
 
+// Darwin 通知回调必须是静态 C 函数（block 不能隐式转换成函数指针，clang 会报错）
+static void DYReloadNotify(CFNotificationCenterRef center, void *observer,
+                           CFStringRef name, const void *object,
+                           CFDictionaryRef userInfo) {
+    (void)center; (void)observer; (void)name; (void)object; (void)userInfo;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DYInvalidateCaches();
+        for (void (^h)(void) in [sHandlers copy]) h();
+    });
+}
+
 void DYObserveReload(void (^handler)(void)) {
     if (!handler) return;
     if (!sHandlers) sHandlers = [NSMutableArray array];
@@ -131,20 +142,8 @@ void DYObserveReload(void (^handler)(void)) {
     if (sSetup) return;
     sSetup = YES;
 
-    static void (*cb)(CFNotificationCenterRef, void *, CFStringRef,
-                      const void *, CFDictionaryRef) = NULL;
-    if (!cb) {
-        cb = ^(CFNotificationCenterRef c, void *o, CFStringRef n,
-               const void *obj, CFDictionaryRef info) {
-            (void)c; (void)o; (void)n; (void)obj; (void)info;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                DYInvalidateCaches();
-                for (void (^h)(void) in [sHandlers copy]) h();
-            });
-        };
-    }
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
-                                    NULL, cb, kReloadNote, NULL,
+                                    NULL, &DYReloadNotify, kReloadNote, NULL,
                                     CFNotificationSuspensionBehaviorCoalesce);
 }
 

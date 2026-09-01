@@ -68,7 +68,7 @@ static void DYInstallGlass(UIView *target) {
         objc_setAssociatedObject(target, kHiddenViewsKey, hidden, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
-    [DYSyncGlassGeometry(target)];
+    DYSyncGlassGeometry(target);
 }
 
 #pragma mark - 公开接口
