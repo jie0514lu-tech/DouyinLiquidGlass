@@ -30,6 +30,7 @@ static id DYCAFilterWithType(NSString *type) {
     CAGradientLayer   *_specularBoost;
     CALayer           *_specularMask;
     CALayer           *_specularBoostMask;
+    CALayer           *_tintLayer;   // 玻璃淡色底（保证内容可读）
     BOOL               _backdropConfigured;
     BOOL               _filterAttached;
 }
@@ -80,29 +81,47 @@ static id DYCAFilterWithType(NSString *type) {
         if (!type.length) type = @"systemMaterialBlur";
 
         NSArray *existing = layer.filters;
-        if (_filterAttached && existing.count == 1) {
+        if (_filterAttached && existing.count > 0) {
             NSString *cur = nil;
             @try { cur = [existing.firstObject valueForKey:@"type"]; } @catch (...) {}
             if ([cur isEqualToString:type]) return; // 已套用同款，跳过
         }
 
-        id glassFilter = DYCAFilterWithType(type);
-        if (!glassFilter && ![type isEqualToString:@"gaussianBlur"]) {
-            // 回退：系统材质类型在新系统/旧系统可能不可用
+        id blurFilter = DYCAFilterWithType(type);
+        if (!blurFilter && ![type isEqualToString:@"gaussianBlur"]) {
+            // 回退：系统材质类型可能不可用（如 iOS15 无 systemMaterialBlur）
             type = @"gaussianBlur";
-            glassFilter = DYCAFilterWithType(type);
+            blurFilter = DYCAFilterWithType(type);
         }
-        if (!glassFilter) return;
+        if (!blurFilter) return;
 
-        CGFloat blur = DYBlurRadius();
-        if ([type isEqualToString:@"gaussianBlur"] && blur > 0.0) {
+        if ([type isEqualToString:@"gaussianBlur"]) {
+            // iOS15 无系统材质时用 gaussianBlur，必须给半径否则等于没模糊
+            CGFloat blur = DYBlurRadius();
+            if (blur <= 0.0) blur = 25.0;
             @try {
-                [glassFilter setValue:@(blur) forKey:@"inputRadius"];
-                [glassFilter setValue:@YES forKey:@"inputNormalizeEdges"];
+                [blurFilter setValue:@(blur) forKey:@"inputRadius"];
+                [blurFilter setValue:@YES forKey:@"inputNormalizeEdges"];
             } @catch (__unused NSException *e) {}
         }
 
-        layer.filters = @[glassFilter];
+        // 叠加"饱和度 + 亮度"滤镜链，逼近系统液态玻璃的鲜活质感。
+        // 每一环都单独容错：某一环不可用就跳过，不影响主模糊。
+        NSMutableArray<id> *chain = [NSMutableArray arrayWithObject:blurFilter];
+
+        id satFilter = DYCAFilterWithType(@"saturate");
+        if (satFilter) {
+            @try { [satFilter setValue:@(1.8) forKey:@"inputAmount"]; } @catch (...) {}
+            [chain addObject:satFilter];
+        }
+
+        id brightFilter = DYCAFilterWithType(@"brightness");
+        if (brightFilter) {
+            @try { [brightFilter setValue:@(1.05) forKey:@"inputAmount"]; } @catch (...) {}
+            [chain addObject:brightFilter];
+        }
+
+        layer.filters = chain;
         self.filterType = [type copy];
         _filterAttached = YES;
     } @catch (NSException *e) {
@@ -112,6 +131,14 @@ static id DYCAFilterWithType(NSString *type) {
 
 - (void)updateSpecular {
     if (CGRectIsEmpty(self.bounds)) return;
+
+    // 玻璃淡色底：铺一层很淡的白色，保证玻璃上的文字/图标在花背景上依然可读
+    if (!_tintLayer) {
+        _tintLayer = [CALayer layer];
+        _tintLayer.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.06].CGColor;
+        [self.layer addSublayer:_tintLayer];
+    }
+
     CGFloat gloss = DYGlossIntensity();
     if (gloss <= 0.001) {
         _specular.hidden = YES;
@@ -152,6 +179,9 @@ static id DYCAFilterWithType(NSString *type) {
     [CATransaction setDisableActions:YES];
     _specular.hidden = NO;
     _specularBoost.hidden = NO;
+    _tintLayer.frame = self.bounds;
+    _tintLayer.cornerRadius = self.layer.cornerRadius;
+    _tintLayer.cornerCurve  = self.layer.cornerCurve;
     for (CALayer *g in @[_specular, _specularBoost]) g.frame = self.bounds;
     for (CALayer *m in @[_specularMask, _specularBoostMask]) {
         m.frame = self.bounds;

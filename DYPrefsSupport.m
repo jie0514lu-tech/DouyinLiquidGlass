@@ -18,6 +18,11 @@ static NSDictionary<NSString *, id> *sCache;
 static NSMutableArray<void (^)(void)> *sHandlers;
 static BOOL sSetup;
 
+// 类名命中缓存：避免抖音里上千个视图、每次布局都重复做字符串匹配
+static NSMutableSet<NSString *> *sClassHitCache;       // 类名命中
+static NSMutableSet<NSString *> *sClassMissCache;      // 类名未命中
+static NSMutableSet<NSString *> *sClassExcludedCache;  // 类名被排除
+
 static NSString *DYPrefsPath(void) {
     return jbroot(@"/var/mobile/Library/Preferences/com.dy.liquidglass.plist");
 }
@@ -57,6 +62,31 @@ BOOL DYGlobalEnabled(void) {
     return DYBool(@"Enabled", YES);
 }
 
+BOOL DYDebugEnabled(void) {
+    return DYBool(@"Debug", YES);
+}
+
+NSInteger DYClassDecision(NSString *className) {
+    if (!className.length) return 0;
+    if ([sClassHitCache containsObject:className]) return 1;
+    if ([sClassExcludedCache containsObject:className]) return -1;
+    if ([sClassMissCache containsObject:className]) return 0;
+
+    if (DYIsExcluded(className)) {
+        if (!sClassExcludedCache) sClassExcludedCache = [NSMutableSet set];
+        [sClassExcludedCache addObject:className];
+        return -1;
+    }
+    if (DYIsExactTarget(className) || DYMatchesTargetSubstring(className)) {
+        if (!sClassHitCache) sClassHitCache = [NSMutableSet set];
+        [sClassHitCache addObject:className];
+        return 1;
+    }
+    if (!sClassMissCache) sClassMissCache = [NSMutableSet set];
+    [sClassMissCache addObject:className];
+    return 0;
+}
+
 NSString *DYFilterType(void) {
     id v = DYValue(@"FilterType");
     if ([v isKindOfClass:[NSString class]] && [v length]) return v;
@@ -89,9 +119,25 @@ BOOL DYIsExactTarget(NSString *className) {
     return [DYStrings(@"TargetClasses") containsObject:className];
 }
 
+// 抖音常见控件类名子串：无需 class-dump 即可命中底部栏/工具栏
+// 可用 plist 的 TargetSubstrings 覆盖（填了自定义就以自定义为准）
+static NSArray<NSString *> *sDefaultSubstrings;
+
+static NSArray<NSString *> *DYTargetSubstrings(void) {
+    if (!sDefaultSubstrings) {
+        sDefaultSubstrings = @[
+            @"TabBar", @"TabBars", @"BottomBar", @"BottomNav",
+            @"MainTabBar", @"ToolBar", @"BottomTab",
+        ];
+    }
+    NSArray *custom = DYStrings(@"TargetSubstrings");
+    if (custom.count) return custom; // 自定义优先
+    return sDefaultSubstrings;
+}
+
 BOOL DYMatchesTargetSubstring(NSString *className) {
     if (!className.length) return NO;
-    for (NSString *sub in DYStrings(@"TargetSubstrings")) {
+    for (NSString *sub in DYTargetSubstrings()) {
         if (sub.length && [className containsString:sub]) return YES;
     }
     return NO;
@@ -149,4 +195,7 @@ void DYObserveReload(void (^handler)(void)) {
 
 void DYInvalidateCaches(void) {
     sCache = nil;
+    [sClassHitCache removeAllObjects];
+    [sClassMissCache removeAllObjects];
+    [sClassExcludedCache removeAllObjects];
 }
