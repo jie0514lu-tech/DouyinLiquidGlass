@@ -68,6 +68,14 @@ static NSInteger DYHitKind(UIView *v) {
     [self dy_didMoveToWindow];
     if (!self.window) return;
     @try {
+        // 极速白名单：所有苹果原生 UI 组件直接放行（不跑字符串匹配/几何计算）。
+        // ① 性能：抖音里数以万计的 UILabel/UIImageView 不再进 DYHitKind；
+        // ② 防套娃：我们玻璃内部的 _fxView(UIVisualEffectView)/_tintView 也是 UI* 前缀，
+        //    在此直接跳过，彻底杜绝"玻璃内部再套玻璃"的无限递归。
+        // 抖音业务组件通常以 AWE/DUX 等自定义前缀开头，不受影响。
+        NSString *cls = NSStringFromClass(self.class);
+        if ([cls hasPrefix:@"UI"] || [cls hasPrefix:@"_UI"]) return;
+
         NSInteger kind = DYHitKind(self);
         if (kind > 0) DYApplyGlassToView(self, kind);
     } @catch (__unused NSException *e) {

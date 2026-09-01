@@ -53,6 +53,19 @@ BOOL DYIsInternalView(UIView *view) {
     if (!view) return NO;
     if ([view isKindOfClass:[DYGlassView class]]) return YES;
     if (objc_getAssociatedObject(view, kShadowMarkerKey)) return YES;
+
+    // 向上防套娃（关键）：玻璃视图内部的任何子视图（_fxView/_tintView/高光层等）
+    // 的 frame 往往等于目标（如底栏）尺寸，若只判"自身"会漏判，导致无限套玻璃→栈溢出。
+    UIView *superview = view.superview;
+    while (superview) {
+        if ([superview isKindOfClass:[DYGlassView class]]) return YES;
+        superview = superview.superview;
+    }
+
+    // 向下防套娃：系统磨砂/特效组件及其私有类一律不处理（防 UIVisualEffectView 内部懒加载视图）
+    NSString *cls = NSStringFromClass(view.class);
+    if ([cls hasPrefix:@"UIVisualEffect"] || [cls hasPrefix:@"_UIVisualEffect"]) return YES;
+
     return NO;
 }
 
