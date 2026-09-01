@@ -1,6 +1,6 @@
 Package: com.dy.liquidglass
 Name: Douyin Liquid Glass
-Version: 0.5.4
+Version: 0.5.6
 Architecture: iphoneos-arm
 Description: 抖音 App 内液态玻璃（自绘风格：磨砂+高光+圆角，不依赖 substrate）
 Maintainer: you

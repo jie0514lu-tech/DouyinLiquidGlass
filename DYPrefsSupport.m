@@ -63,9 +63,10 @@ BOOL DYGlobalEnabled(void) {
 }
 
 BOOL DYDebugEnabled(void) {
-    // 0.5.3 起默认关闭：不再画红框/打日志，避免干扰正常界面。
-    // 需要诊断时把 plist 的 Debug 改成 YES 即可。
-    return DYBool(@"Debug", NO);
+    // 0.5.6 起彻底写死为 NO（无视本地残留旧 plist）。
+    // 之前真机上红框一直出现，就是因为诊断时手动把 plist 的 Debug 改过 YES，
+    // 残留配置压过了代码默认值。诊断开关不再读配置。
+    return NO;
 }
 
 NSInteger DYClassDecision(NSString *className) {
@@ -113,12 +114,10 @@ CGFloat DYCornerRadius(void) {
 }
 
 BOOL DYHeuristicsEnabled(void) {
-    // 总开关（默认 YES）。0.5.3 起三种启发式各自独立可关：
-    //   BottomHeuristic = NO（底部宽条，误伤全屏 cell / 底部渐变）
-    //   TopHeuristic    = NO（顶部导航，误伤全屏 cell 的顶部切片）
-    //   SideHeuristic   = YES（右侧按钮：右缘 30~110pt 方形，精确，保留给
-    //                         点赞/评论/收藏/分享——它们类名尚未核实时唯一路径）
-    return DYBool(@"Heuristics", YES);
+    // 0.5.6 起彻底关闭几何盲猜（无视本地残留旧 plist）：
+    // 底部/顶部/右侧启发式全部不跑，杜绝 AWEFeedViewCell 整屏误套。
+    // 命中只走精确类名白名单 + 带护栏的子串白名单。
+    return NO;
 }
 
 BOOL DYFloatingEnabled(void) {
@@ -129,8 +128,14 @@ CGFloat DYFloatingMargin(void) {
     return DYFloat(@"FloatMargin", 16.0);
 }
 
+CGFloat DYFloatingWidth(void) {
+    // 0.5.5：悬浮药丸的固定宽度（默认 300pt，居中），避免"全屏宽药丸"盖住底部进度条。
+    // 传 -1 时回退为"全屏宽 - 2×Margin"的旧行为。
+    return DYFloat(@"FloatWidth", 300.0);
+}
+
 CGFloat DYFloatingLift(void) {
-    return DYFloat(@"FloatLift", 12.0);
+    return DYFloat(@"FloatLift", 24.0);
 }
 
 CGFloat DYFloatingCornerRadius(void) {
@@ -138,8 +143,8 @@ CGFloat DYFloatingCornerRadius(void) {
 }
 
 BOOL DYShowClassTag(void) {
-    // 0.5.3 起默认关闭。类名已经抓到，正常使用不再显示红色类名标签。
-    return DYBool(@"ShowClassTag", NO);
+    // 0.5.6 起彻底写死为 NO（无视本地残留旧 plist），不再显示红色类名标签。
+    return NO;
 }
 
 UIBlurEffectStyle DYBlurStyle(void) {
@@ -158,10 +163,9 @@ static NSArray<NSString *> *DYTargetClasses(void) {
         sDefaultTargetClasses = @[
             @"AWEFeedTopBarContainer", // 顶部导航容器（直播/团购/热点…）已核实
             @"AWENormalModeTabBar",    // 底部 tab 栏容器（会被悬浮成药丸）已核实
-            // ↓ 以下为猜测类名（右侧点赞/评论/收藏/分享容器），未实证，
-            //   精确匹配不会误伤；若真机无效则说明类名不对，靠 SideHeuristic 几何兜底
-            @"AWEFeedInteractView",
-            @"AWEFeedInteractionView",
+            // 注意：不再加入猜测的右侧容器类名（AWEFeedInteractView 等）——
+            // 实测会匹配到大容器、玻璃盖住头像/点赞/评论/分享图标。
+            // 右侧按钮改由 SideHeuristic 精确几何判定（且必须含图标）。
         ];
     }
     NSArray *custom = DYStrings(@"TargetClasses");
@@ -174,11 +178,25 @@ BOOL DYIsExactTarget(NSString *className) {
     return [DYTargetClasses() containsObject:className];
 }
 
-// 子串匹配默认清空：之前的 "TabBar"/"BottomBar" 等宽子串会误伤
-// AWENormalModeTabBarBlurView / BadgeContainerView / AvatarView 等子视图，
-// 造成"容器+子视图"多层嵌套玻璃。精准打击不需要子串。
+// 子串白名单：0.5.6 默认加入"右侧四大金刚+头像"的猜测类名。
+// 注意：这些类名是猜测（截图里右侧从未被标过类名），必须配合 DYGlassInjector
+// 里的"非精确命中必须是小尺寸且含图标/文字"护栏，防止误套大容器盖住按钮。
+// 若真机无效，说明类名不对，需用诊断手段抓真实类名。
+static NSArray<NSString *> *sDefaultSubstrings;
+
 static NSArray<NSString *> *DYTargetSubstrings(void) {
-    return DYStrings(@"TargetSubstrings"); // 默认空，需要时用 plist 开启
+    if (!sDefaultSubstrings) {
+        sDefaultSubstrings = @[
+            @"AWEFeedLikeButton",       // 右侧：点赞（猜测）
+            @"AWEFeedCommentButton",    // 右侧：评论（猜测）
+            @"AWEFeedShareButton",      // 右侧：分享（猜测）
+            @"AWEFeedCollectionButton", // 右侧：收藏（猜测）
+            @"AWEFeedAvatarView",       // 右侧：头像（猜测）
+        ];
+    }
+    NSArray *custom = DYStrings(@"TargetSubstrings");
+    if (custom.count) return custom; // 自定义优先
+    return sDefaultSubstrings;
 }
 
 BOOL DYMatchesTargetSubstring(NSString *className) {

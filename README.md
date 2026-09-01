@@ -6,14 +6,16 @@
 - 只作用于抖音进程（bundle id：`com.ss.iphone.ugc.Aweme`），不碰 DYKiller，可共存
 - 支持 iOS 14.0+
 
-## 架构（0.5.0，针对真机反馈重构）
+## 架构（0.5.6，稳定最终形态）
 
 **不依赖 CydiaSubstrate / ElleKit 的 `%hook`**，用 Objective-C runtime 直接 swizzle。核心四点：
 
-1. **悬浮药丸重构**：底栏自动缩成"左右留白 + 抬高 + 药丸圆角 + 独立阴影"的悬浮条；
-2. **定向 Hook**：放弃全局 `layoutSubviews` Hook，只对已套玻璃的类做定向 Hook（性能更优，不拖慢抖音滑动）；
-3. **稳定磨砂**：底层用 `UIVisualEffectView`（App 进程内稳定），不再依赖 `CABackdropLayer`/`CAFilter`（那套在第三方 App 内会退化）；自绘对角线高光 + 顶部亮边保留；
-4. **深度清底 + 层级正确**：自动隐藏铺满的深色渐变/纯色底/背景图，玻璃不被黑底盖住。
+1. **悬浮胶囊（不改原生容器）**：底栏容器保持原生位置尺寸，玻璃画成"胶囊"垫在容器内部——原生 tab 项天然都在胶囊内（标签跟随），容器不动所以不碰进度条、不触 AutoLayout 冲突、切 tab 不消失；
+2. **定向 Hook**：只对已套玻璃的类做定向 `layoutSubviews` Hook（性能优，不拖慢抖音）；
+3. **稳定磨砂**：`UIVisualEffectView`（App 进程内稳定），自绘对角线高光 + 顶部亮边；右侧按钮/头像方形自动转**圆形胶囊**；
+4. **保守清底 + 层级正确**：只隐藏"铺满且类名像背景/含 Blur、且内部无任何图标/文字"的视图；**任何含 UIImageView/UILabel 的子视图一律不隐藏**（头像/图标绝不误伤）；玻璃被原生重排移除时自动钉回底层。
+
+**诊断开关写死关闭**：Debug / ShowClassTag / Heuristics 一律 `return NO`，**无视本地残留旧 plist**（此前真机红框/标签一直出现，是诊断时手动改过 plist 的残留值在作祟）。
 
 同一份 dylib **两种装法都能跑**：
 - 作为 **deb 装进 Dopamine（Sileo）**，由 ElleKit 注入抖音进程；
@@ -24,17 +26,17 @@
 | Key | 默认 | 说明 |
 |---|---|---|
 | `Enabled` | YES | 总开关 |
-| `Debug` | YES | 调试日志 + 玻璃红框（确认命中后改 NO 去红框） |
-| `ShowClassTag` | YES | 玻璃视图上叠加类名红色小标签（截图即可拿到抖音真实类名） |
-| `Floating` | YES | 底栏悬浮药丸开关 |
-| `FloatMargin` | 16 | 悬浮左右留白(pt) |
-| `FloatLift` | 12 | 悬浮距底抬高(pt) |
-| `FloatCornerRadius` | -1 | 悬浮圆角（-1=高度一半药丸） |
+| `Debug` | **NO（写死）** | 调试红框/日志（不再读配置，防旧 plist 污染） |
+| `ShowClassTag` | **NO（写死）** | 红色类名标签（不再读配置） |
+| `Heuristics` | **NO（写死）** | 几何盲猜（不再读配置，防全屏误伤） |
+| `Floating` | YES | 底栏悬浮胶囊开关 |
+| `FloatMargin` | 16 | 胶囊左右内缩(pt) |
+| `FloatCornerRadius` | -1 | 胶囊圆角（-1=高度一半药丸） |
 | `BlurStyle` | 59 | 磨砂样式（59=SystemThinMaterialDark） |
 | `Gloss` | 0.7 | 高光强度 0~1 |
-| `Heuristics` | YES | 几何启发式（底栏/顶部导航/右侧按钮） |
-| `TargetSubstrings` | 内置 | 类名子串白名单（可用它精准收窄命中） |
-| `ExcludedClasses` | 空 | 排除类名子串 |
+| `TargetClasses` | 内置 | 精确类名白名单：AWEFeedTopBarContainer（顶部导航）/ AWENormalModeTabBar（底部栏） |
+| `TargetSubstrings` | 内置 | 右侧按钮猜测类名（AWEFeedLikeButton 等），**必须小尺寸+含图标才生效** |
+| `ExcludedClasses` | 内置 | 排除：AWEFeedViewCell / AWEGradientView |
 
 ## 效果边界（重要，请务必理解）
 

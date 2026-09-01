@@ -71,32 +71,6 @@ BOOL DYIsInternalView(UIView *view) {
 
 #pragma mark - 深层检测 / 背景判定
 
-// 该视图内部是否存在可交互内容（按钮等）
-static BOOL DYIsInteractiveDeep(UIView *v) {
-    if (v.userInteractionEnabled) return YES;
-    for (UIView *s in v.subviews) {
-        if (DYIsInteractiveDeep(s)) return YES;
-    }
-    return NO;
-}
-
-// 判断 sub 是否是"铺满目标的纯背景子视图"：满足则隐藏，让玻璃透出来。
-static BOOL DYLooksLikeBackgroundSubview(UIView *sub, UIView *target) {
-    if (sub.hidden || sub.alpha < 0.8) return NO;
-
-    CGRect sb = sub.frame;
-    CGRect tb = target.bounds;
-    BOOL fills = CGRectContainsRect(CGRectInset(tb, -1, -1), sb) &&
-                 sb.size.width  >= tb.size.width  * 0.9 &&
-                 sb.size.height >= tb.size.height * 0.9;
-    if (!fills) return NO;
-
-    NSString *cls = NSStringFromClass(sub.class);
-    BOOL nameLikeBg = DYShouldHideSubviewClass(cls);
-    BOOL plainBg    = !DYIsInteractiveDeep(sub) && sub.alpha >= 0.95;
-    return nameLikeBg || plainBg;
-}
-
 // 判断渐变层是否为"深色且不透明"（只看首末两色，防误伤半透明装饰渐变）
 static BOOL DYLayerIsDark(CAGradientLayer *g) {
     NSArray *colors = g.colors;
@@ -117,7 +91,11 @@ static BOOL DYLayerIsDark(CAGradientLayer *g) {
     return YES;
 }
 
-// 深度清理背景：目标自身背景色 + 铺满的深色/纯色/背景图层 + 背景型子视图
+// 深度清理背景（0.5.6 保守版）：
+//  - 目标自身背景色清掉；
+//  - 图层层：只隐藏"铺满的深色渐变/不透明纯色底/背景图"；
+//  - 子视图层：只隐藏"铺满、且类名像背景/含 Blur、且内部无任何图标/文字"的视图。
+//  ★ 任何含 UIImageView/UILabel 的子视图一律不隐藏（头像、点赞图标、标签绝不误伤）。
 static void DYDeepCleanBackground(UIView *target, DYGlassView *glass) {
     // 1) 目标自身背景色（记住以便移除时还原）
     UIColor *bg = target.backgroundColor;
@@ -126,7 +104,7 @@ static void DYDeepCleanBackground(UIView *target, DYGlassView *glass) {
         target.backgroundColor = [UIColor clearColor];
     }
 
-    // 2) 铺满的深色渐变 / 纯色底 / 背景图图层
+    // 2) 图层层：铺满的深色渐变 / 纯色底 / 背景图
     NSMutableArray *hiddenLayers = [NSMutableArray array];
     for (CALayer *sl in [target.layer.sublayers copy]) {
         if (sl.hidden || sl == glass.layer) continue;
@@ -150,14 +128,23 @@ static void DYDeepCleanBackground(UIView *target, DYGlassView *glass) {
         objc_setAssociatedObject(target, kHiddenLayersKey, hiddenLayers,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    // 3) 铺满且无交互的背景型子视图
+    // 3) 子视图层：铺满 + 类名像背景/含Blur + 无图标文字 → 隐藏
     NSMutableArray *hiddenViews = [NSMutableArray array];
     for (UIView *sub in [target.subviews copy]) {
         if (sub == glass) continue;
-        if (DYLooksLikeBackgroundSubview(sub, target)) {
-            sub.hidden = YES;
-            [hiddenViews addObject:sub];
-        }
+        // ★ 免死金牌：含图标/文字的视图绝不隐藏（头像、点赞图标、tab 图标与文字）
+        if (DYHasImageOrLabelDeep(sub)) continue;
+
+        CGRect sb = sub.frame;
+        BOOL fills = sb.size.width  >= target.bounds.size.width  * 0.9 &&
+                     sb.size.height >= target.bounds.size.height * 0.9;
+        if (!fills) continue;
+
+        NSString *cls = NSStringFromClass(sub.class);
+        BOOL bgLike = DYShouldHideSubviewClass(cls) || [cls containsString:@"Blur"];
+        if (!bgLike) continue;
+        sub.hidden = YES;
+        [hiddenViews addObject:sub];
     }
     if (hiddenViews.count)
         objc_setAssociatedObject(target, kHiddenViewsKey, hiddenViews,
@@ -165,6 +152,24 @@ static void DYDeepCleanBackground(UIView *target, DYGlassView *glass) {
 }
 
 #pragma mark - 悬浮药丸重构
+
+// 深查某视图内部是否含图标/文字（UIImageView 或 UILabel）。
+// 用于右侧按钮：只给"真实按钮"（含图标）套玻璃，透明手势层/装饰容器不套，
+// 避免玻璃盖住头像、点赞、评论、分享图标。
+static BOOL DYHasImageOrLabelDeep(UIView *v) {
+    if ([v isKindOfClass:[UIImageView class]]) {
+        UIImageView *iv = (UIImageView *)v;
+        if (iv.image) return YES;
+    }
+    if ([v isKindOfClass:[UILabel class]]) {
+        UILabel *l = (UILabel *)v;
+        if (l.text.length) return YES;
+    }
+    for (UIView *s in v.subviews) {
+        if (DYHasImageOrLabelDeep(s)) return YES;
+    }
+    return NO;
+}
 
 static BOOL DYShouldFloatTarget(UIView *target, NSInteger kind) {
     if (kind == 2) return YES; // 底栏启发式：直接悬浮
@@ -178,68 +183,55 @@ static BOOL DYShouldFloatTarget(UIView *target, NSInteger kind) {
     return NO;
 }
 
-// 悬浮药丸：左右留白 + 抬高 + 药丸圆角；阴影用独立视图承载（masksToBounds 会吃掉阴影）
+// 悬浮药丸（0.5.6 新方案）：★绝不修改原生容器 frame★。
+// 抖音的 AutoLayout/切 tab 动画会和我们改 frame 冲突（标签不跟随、切换消失、顶到进度条）。
+// 现在：容器保持原生位置尺寸，我们把玻璃画成"胶囊"垫在容器内部（水平内缩 margin），
+// 原生 tab 项还在原生位置 → 天然都在胶囊内（标签跟随）；容器不动 → 不碰进度条、不触发布局冲突。
+// 阴影作为玻璃的兄弟层插在容器内部（随容器一起生灭，无孤儿泄漏问题）。
 static void DYApplyFloating(UIView *target, DYGlassView *glass) {
     if (!target.window || !target.superview) return;
 
-    // 重入防护：同一次逻辑内若再次进入（如 setNeedsLayout 偶发同步触发布局），直接返回，
-    // 彻底杜绝"悬浮→setNeedsLayout→Hook→再悬浮"的 CPU 100% 死循环风险。
+    // 重入防护：同一次逻辑内若再次进入直接返回，杜绝"悬浮→setNeedsLayout→Hook→再悬浮"死循环
     if (objc_getAssociatedObject(target, kFloatingBusyKey)) return;
     objc_setAssociatedObject(target, kFloatingBusyKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     @try {
-        CGRect winF = [target convertRect:target.bounds toView:target.window];
-        CGFloat winW = target.window.bounds.size.width;
-        CGFloat winH = target.window.bounds.size.height;
-
-        CGFloat margin = DYFloatingMargin();   // 左右留白
-        CGFloat lift   = DYFloatingLift();     // 距底抬高
-        CGFloat newW   = winW - margin * 2.0;
-        if (newW < 80.0) return;
-        CGFloat newH = winF.size.height;
-        CGFloat newX = margin;
-        CGFloat newY = winH - lift - newH;
-        CGRect newWin = CGRectMake(newX, newY, newW, newH);
-        CGRect newLocal = [target.superview convertRect:newWin fromView:target.window];
-
-        // 容差判断替代严格相等：多次坐标转换产生的极小浮点抖动不会引发反复 setNeedsLayout
-        CGRect oldF = target.frame;
-        if (fabs(oldF.origin.x - newLocal.origin.x) > 0.5 ||
-            fabs(oldF.origin.y - newLocal.origin.y) > 0.5 ||
-            fabs(oldF.size.width  - newLocal.size.width)  > 0.5 ||
-            fabs(oldF.size.height - newLocal.size.height) > 0.5) {
-            target.frame = newLocal;
-            [target setNeedsLayout];
-        }
-
+        CGRect b = target.bounds;
+        CGFloat margin = DYFloatingMargin();
+        CGFloat pillW = b.size.width - margin * 2.0;
+        if (pillW < 80.0) return;
+        CGFloat pillH = b.size.height - 8.0;   // 上下各留 4pt，看起来像悬浮胶囊
+        if (pillH < 16.0) pillH = b.size.height;
+        CGFloat pillX = margin;
+        CGFloat pillY = (b.size.height - pillH) * 0.5; // 垂直居中
+        CGRect pillFrame = CGRectMake(pillX, pillY, pillW, pillH);
         CGFloat radius = DYFloatingCornerRadius();
-        if (radius < 0.0) radius = newH * 0.5; // 药丸：高度一半
-        target.layer.cornerRadius = radius;
-        target.layer.cornerCurve  = kCACornerCurveContinuous;
-        target.layer.masksToBounds = YES;      // 裁内容/玻璃到药丸内
+        if (radius < 0.0) radius = pillH * 0.5;  // 药丸：高度一半
+
+        // 容器不裁内容（否则阴影出不去）；玻璃自身有 masksToBounds=YES 负责裁模糊
+        target.layer.masksToBounds = NO;
+
+        glass.frame = pillFrame;
         glass.layer.cornerRadius = radius;
         [glass updateSpecular];
 
-        // 独立阴影层（先打内部标记，再插入——否则插入瞬间 didMoveToWindow 会把阴影误判成底栏再套玻璃）
+        // 阴影层：插在容器内部、玻璃之下（兄弟层，随容器生灭）
         UIView *shadow = objc_getAssociatedObject(target, kShadowKey);
         if (!shadow) {
             shadow = [[UIView alloc] init];
             shadow.userInteractionEnabled = NO;
             shadow.backgroundColor = [UIColor clearColor];
             objc_setAssociatedObject(shadow, kShadowMarkerKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            [target.superview insertSubview:shadow belowSubview:target];
             objc_setAssociatedObject(target, kShadowKey, shadow, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-            // 生命周期追踪：target 被销毁时自动拔掉阴影，防孤儿视图泄漏
-            __weak UIView *weakShadow = shadow;
-            DYDeallocTracker *tracker = [[DYDeallocTracker alloc] init];
-            tracker.onDealloc = ^{
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [weakShadow removeFromSuperview];
-                });
-            };
-            objc_setAssociatedObject(target, kShadowTrackerKey, tracker, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-        shadow.frame = newLocal;
+        // 原生重排可能把阴影摘掉/顶上去：自愈到"玻璃下方"
+        if (shadow.superview != target) {
+            [target insertSubview:shadow belowSubview:glass];
+        } else if ([target.subviews indexOfObject:shadow] >
+                   [target.subviews indexOfObject:glass]) {
+            [shadow removeFromSuperview];
+            [target insertSubview:shadow belowSubview:glass];
+        }
+        shadow.frame = pillFrame;
         shadow.layer.shadowColor   = [UIColor blackColor].CGColor;
         shadow.layer.shadowOpacity = 0.28;
         shadow.layer.shadowRadius  = 12.0;
@@ -249,6 +241,26 @@ static void DYApplyFloating(UIView *target, DYGlassView *glass) {
     } @finally {
         objc_setAssociatedObject(target, kFloatingBusyKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+}
+
+// 非悬浮目标（右侧按钮 / 顶部导航等）：玻璃铺满目标，方形自动转圆形胶囊
+static void DYApplyRoundedGlass(UIView *target, DYGlassView *glass) {
+    CGRect b = target.bounds;
+    glass.frame = b;
+
+    CGFloat w = b.size.width, h = b.size.height;
+    CGFloat radius = DYCornerRadius();
+    if (radius < 0.0) {
+        radius = target.layer.cornerRadius;
+        if (radius <= 0.0 && w > 0 && fabs(w - h) < 2.0) {
+            radius = w * 0.5;              // 方形 → 正圆
+        }
+    }
+    if (radius <= 0.0) radius = 12.0;
+    CGFloat maxR = MIN(w, h) * 0.5;        // 圆角不超过短边一半
+    if (radius > maxR) radius = maxR;
+    glass.layer.cornerRadius = radius;
+    [glass updateSpecular];
 }
 
 #pragma mark - 类名调试标签
@@ -344,15 +356,26 @@ void DYResyncTarget(UIView *target) {
     DYGlassView *glass = DYGlassForTarget(target);
     if (!glass) return;
 
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-
-    NSNumber *kindNum = objc_getAssociatedObject(target, kKindKey);
-    NSInteger kind = kindNum ? kindNum.integerValue : 0;
-    if (DYFloatingEnabled() && DYShouldFloatTarget(target, kind)) {
-        DYApplyFloating(target, glass);
+    // 切 tab 时原生可能重排/移除子视图：玻璃被摘掉就重新钉回 index 0（背景之上、内容之下）
+    if (glass.superview != target) {
+        [target insertSubview:glass atIndex:0];
+    } else if (target.subviews.firstObject != glass) {
+        [glass removeFromSuperview];
+        [target insertSubview:glass atIndex:0];
+    }
+    // 阴影必须保持"玻璃下方"（DYApplyFloating 里也有自愈，这里双保险）
+    UIView *shadow = objc_getAssociatedObject(target, kShadowKey);
+    if (shadow && shadow.superview == target) {
+        NSUInteger gi = [target.subviews indexOfObject:glass];
+        NSUInteger si = [target.subviews indexOfObject:shadow];
+        if (si != NSNotFound && gi != NSNotFound && si > gi) {
+            [shadow removeFromSuperview];
+            [target insertSubview:shadow belowSubview:glass];
+        }
     }
 
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     DYSyncGlassGeometry(target);
     [CATransaction commit];
 }
@@ -362,25 +385,14 @@ void DYSyncGlassGeometry(UIView *target) {
     DYGlassView *glass = DYGlassForTarget(target);
     if (!glass) return;
 
-    CGRect b = target.bounds;
-    if (!CGRectEqualToRect(glass.frame, b)) {
-        glass.frame = b;
-    }
-
-    CGFloat radius = DYCornerRadius();
-    if (radius < 0.0) radius = target.layer.cornerRadius;
-    if (radius <= 0.0) radius = 12.0;
-    if (fabs(glass.layer.cornerRadius - radius) > 0.5) {
-        glass.layer.cornerRadius = radius;
-        [glass updateSpecular];
-    }
-    [glass updateSpecular];
-
-    // 刷新类名标签位置
-    UIView *tag = objc_getAssociatedObject(target, kTagKey);
-    if (tag && target.window) {
-        CGRect tf = [target convertRect:target.bounds toView:target.window];
-        tag.frame = CGRectMake(tf.origin.x, tf.origin.y, MIN(tf.size.width, 200), 16);
+    NSNumber *kindNum = objc_getAssociatedObject(target, kKindKey);
+    NSInteger kind = kindNum ? kindNum.integerValue : 0;
+    if (DYFloatingEnabled() && DYShouldFloatTarget(target, kind)) {
+        // 底部 tab 栏：悬浮胶囊（不改容器 frame）
+        DYApplyFloating(target, glass);
+    } else {
+        // 顶部导航 / 右侧按钮：铺满 + 方形自动转圆
+        DYApplyRoundedGlass(target, glass);
     }
 }
 
@@ -396,17 +408,13 @@ static void DYInstallGlass(UIView *target, NSInteger kind) {
     objc_setAssociatedObject(target, kKindKey, @(kind), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [DYGlassMap() setObject:glass forKey:target];
 
-    // 深度清理背景（深色渐变/纯色底/背景图）→ 玻璃不被黑底盖住
+    // 深度清理背景（深色渐变/纯色底/背景图/Blur 子视图）→ 玻璃不被黑底盖住；含图标文字的一律不隐藏
     DYDeepCleanBackground(target, glass);
-
-    // 悬浮药丸重构（底栏类）
-    if (DYFloatingEnabled() && DYShouldFloatTarget(target, kind)) {
-        DYApplyFloating(target, glass);
-    }
 
     // 定向布局 Hook：只跟踪这一个类，替代全局 layoutSubviews
     DYTrackLayoutForClass(target.class);
 
+    // 应用几何（悬浮胶囊 / 圆角玻璃，按类别自动选择）
     DYSyncGlassGeometry(target);
 
     // 延迟补刷：目标 frame 可能在 didMoveToWindow 之后才被设置
@@ -417,10 +425,7 @@ static void DYInstallGlass(UIView *target, NSInteger kind) {
     });
 
     if (DYDebugEnabled()) {
-        NSLog(@"[DouyinLiquidGlass] 套玻璃: %@ kind=%ld filter=%@",
-              NSStringFromClass(target.class), (long)kind, glass.filterType);
-        glass.layer.borderColor = [UIColor redColor].CGColor;
-        glass.layer.borderWidth = 1.5;
+        NSLog(@"[DouyinLiquidGlass] 套玻璃: %@ kind=%ld", NSStringFromClass(target.class), (long)kind);
     }
 
     DYAddClassTag(target);
@@ -428,6 +433,18 @@ static void DYInstallGlass(UIView *target, NSInteger kind) {
 
 void DYApplyGlassToView(UIView *target, NSInteger kind) {
     if (!target) return;
+    // 右侧按钮（kind==4 几何判定，已随启发式关闭不会触发，保留兜底）：只给含图标/文字的套玻璃
+    if (kind == 4 && !DYHasImageOrLabelDeep(target)) return;
+
+    NSString *cls = NSStringFromClass(target.class);
+    if (!DYIsExactTarget(cls)) {
+        // 非精确命中（子串白名单的"右侧按钮"猜测类名，未核实）：
+        //  ① 必须是小尺寸（真实按钮，≤160pt），大容器直接拒绝——防玻璃盖住头像/点赞/评论/分享；
+        //  ② 必须含图标/文字。
+        if (target.bounds.size.width  > 160.0 ||
+            target.bounds.size.height > 160.0) return;
+        if (!DYHasImageOrLabelDeep(target)) return;
+    }
     DYInstallGlass(target, kind);
     DYSyncGlassGeometry(target);
 }
