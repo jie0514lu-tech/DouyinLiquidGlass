@@ -71,6 +71,10 @@ BOOL DYIsInternalView(UIView *view) {
 
 #pragma mark - 深层检测 / 背景判定
 
+// 前置声明：DYDeepCleanBackground（较早）会调用 DYHasImageOrLabelDeep（较晚定义）。
+// static 函数没有头文件声明，必须先在这里声明，否则 clang 报 implicit declaration 编译错误。
+static BOOL DYHasImageOrLabelDeep(UIView *v);
+
 // 判断渐变层是否为"深色且不透明"（只看首末两色，防误伤半透明装饰渐变）
 static BOOL DYLayerIsDark(CAGradientLayer *g) {
     NSArray *colors = g.colors;
