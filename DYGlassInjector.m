@@ -69,6 +69,11 @@ static void DYInstallGlass(UIView *target) {
     }
 
     DYSyncGlassGeometry(target);
+
+    if (DYDebugEnabled()) {
+        NSLog(@"[DouyinLiquidGlass] 套玻璃: %@ (filter=%@)",
+              NSStringFromClass(target.class), glass.filterType);
+    }
 }
 
 #pragma mark - 公开接口

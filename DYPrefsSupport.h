@@ -8,6 +8,15 @@ NS_ASSUME_NONNULL_BEGIN
 /// 全局开关（默认开）
 BOOL DYGlobalEnabled(void);
 
+/// 调试日志开关（默认开，便于首测定位命中情况）
+BOOL DYDebugEnabled(void);
+
+/// 类名判定（带缓存）：
+///   1  = 命中（套玻璃）
+///   -1 = 被排除（直接跳过，连启发式也不看）
+///   0  = 类名未命中（可继续交给几何启发式）
+NSInteger DYClassDecision(NSString *className);
+
 /// 当前应该用的滤镜类型（默认 systemMaterialBlur）
 NSString *DYFilterType(void);
 
