@@ -132,10 +132,10 @@ static id DYCAFilterWithType(NSString *type) {
 - (void)updateSpecular {
     if (CGRectIsEmpty(self.bounds)) return;
 
-    // 玻璃淡色底：铺一层很淡的白色，保证玻璃上的文字/图标在花背景上依然可读
+    // 玻璃淡色底：铺一层淡白，保证内容可读，且即使模糊未生效也有玻璃面板质感
     if (!_tintLayer) {
         _tintLayer = [CALayer layer];
-        _tintLayer.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.06].CGColor;
+        _tintLayer.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.14].CGColor;
         [self.layer addSublayer:_tintLayer];
     }
 

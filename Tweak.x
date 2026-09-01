@@ -28,11 +28,17 @@ static BOOL DYShouldHandleView(UIView *v) {
     if (!cls.length) return NO;
 
     NSInteger decision = DYClassDecision(cls);
-    if (decision == 1) return YES;   // 类名命中（白名单/子串）
+    if (decision == 1) {
+        if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(类名): %@", cls);
+        return YES;   // 类名命中（白名单/子串）
+    }
     if (decision == -1) return NO;   // 被排除，连启发式也不看
 
-    // 类名未命中 → 几何启发式（底部大横条）
-    if (DYHeuristicsEnabled() && DYHeuristicBottomBar(v)) return YES;
+    // 类名未命中 → 几何启发式（底部/悬浮大横条）
+    if (DYHeuristicsEnabled() && DYHeuristicBottomBar(v)) {
+        if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(底栏启发式): %@", cls);
+        return YES;
+    }
 
     return NO;
 }
@@ -95,5 +101,12 @@ static void DYInitialize(void) {
             DYRemoveAllGlass();
             DYInvalidateCaches();
         });
+
+        if (DYDebugEnabled()) {
+            BOOL swz = (m1 && m2 && m3 && m4);
+            NSLog(@"[DouyinLiquidGlass] 插件已加载: UIView swizzle=%@, CABackdropLayer=%@",
+                  swz ? @"OK" : @"FAIL",
+                  NSClassFromString(@"CABackdropLayer") ? @"可用" : @"不可用");
+        }
     });
 }

@@ -17,20 +17,32 @@ static NSMapTable<UIView *, DYGlassView *> *DYGlassMap(void) {
     return sGlassMap;
 }
 
-// 保守隐藏"看起来像背景"的子视图：类名含指定子串，且铺满目标 bounds，
-// 且不在最上层（避免误伤前景图标/文字）。
-static BOOL DYLooksLikeBackgroundSubview(UIView *sub, UIView *target) {
-    if (!sub.hidden && sub.alpha > 0.1 && !sub.userInteractionEnabled) {
-        CGRect sb = sub.frame;
-        CGRect tb = target.bounds;
-        // 铺满目标且尺寸足够大
-        if (CGRectContainsRect(CGRectInset(tb, -1, -1), sb) &&
-            sb.size.width >= tb.size.width * 0.9 &&
-            sb.size.height >= tb.size.height * 0.9) {
-            if (DYShouldHideSubviewClass(NSStringFromClass(sub.class))) return YES;
-        }
+// 深层检测：该视图内部是否存在可交互内容（按钮等）
+static BOOL DYIsInteractiveDeep(UIView *v) {
+    if (v.userInteractionEnabled) return YES;
+    for (UIView *s in v.subviews) {
+        if (DYIsInteractiveDeep(s)) return YES;
     }
     return NO;
+}
+
+// 判断 sub 是否是"铺满目标的纯背景子视图"：满足则隐藏，让玻璃透出来。
+// 判定：铺满目标 bounds + 不透明 + 无可交互内容（避免误伤图标/按钮/文字层）。
+static BOOL DYLooksLikeBackgroundSubview(UIView *sub, UIView *target) {
+    if (sub.hidden || sub.alpha < 0.8) return NO;
+
+    CGRect sb = sub.frame;
+    CGRect tb = target.bounds;
+    BOOL fills = CGRectContainsRect(CGRectInset(tb, -1, -1), sb) &&
+                 sb.size.width  >= tb.size.width  * 0.9 &&
+                 sb.size.height >= tb.size.height * 0.9;
+    if (!fills) return NO;
+
+    NSString *cls = NSStringFromClass(sub.class);
+    // 类名像背景，或"纯背景"形态（铺满 + 不透明 + 无交互内容）
+    BOOL nameLikeBg  = DYShouldHideSubviewClass(cls);
+    BOOL plainBg     = !DYIsInteractiveDeep(sub) && sub.alpha >= 0.95;
+    return nameLikeBg || plainBg;
 }
 
 #pragma mark - 内部

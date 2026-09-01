@@ -153,7 +153,23 @@ BOOL DYIsExcluded(NSString *className) {
 
 BOOL DYShouldHideSubviewClass(NSString *className) {
     if (!className.length) return NO;
-    for (NSString *sub in DYStrings(@"HideSubviewsContaining")) {
+    // 默认背景类名子串（无需配置即可识别）；可用 plist 的 HideSubviewsContaining 覆盖
+    static NSArray<NSString *> *sDefaults;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        sDefaults = @[
+            @"Background", @"BarBackground", @"BG", @"Bg",
+            @"BackView", @"BottomBg", @"BarBg", @"Wrapper",
+        ];
+    });
+    NSArray *custom = DYStrings(@"HideSubviewsContaining");
+    if (custom.count) {
+        for (NSString *sub in custom) {
+            if (sub.length && [className containsString:sub]) return YES;
+        }
+        return NO;
+    }
+    for (NSString *sub in sDefaults) {
         if (sub.length && [className containsString:sub]) return YES;
     }
     return NO;
@@ -162,11 +178,13 @@ BOOL DYShouldHideSubviewClass(NSString *className) {
 BOOL DYHeuristicBottomBar(UIView *view) {
     if (!view.window) return NO;
     CGRect f = view.bounds;
-    if (f.size.width < 200.0 || f.size.width < f.size.height * 2.0) return NO;
+    // 宽条：宽>=200、宽>=2×高、高>=20（高度下限排除进度条/分隔线等细条）
+    if (f.size.width < 200.0 || f.size.width < f.size.height * 2.0 ||
+        f.size.height < 20.0) return NO;
     CGRect wf = [view convertRect:view.bounds toView:view.window];
     CGFloat winH = view.window.bounds.size.height;
-    // 贴底
-    return fabs(CGRectGetMaxY(wf) - winH) < 60.0;
+    // 贴底或悬浮底栏：距窗口底部 <180pt（覆盖普通 tab 栏与悬浮 dock）
+    return fabs(CGRectGetMaxY(wf) - winH) < 180.0;
 }
 
 // Darwin 通知回调必须是静态 C 函数（block 不能隐式转换成函数指针，clang 会报错）
