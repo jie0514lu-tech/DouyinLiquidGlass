@@ -6,22 +6,42 @@
 - 只作用于抖音进程（bundle id：`com.ss.iphone.ugc.Aweme`），不碰 DYKiller，可共存
 - 支持 iOS 14.0+
 
-## 架构（0.2.0 起）
+## 架构（0.5.0，针对真机反馈重构）
 
-**不依赖 CydiaSubstrate / ElleKit 的 `%hook`**，而是用 Objective-C runtime 直接 swizzle
-`UIView` 的 `didMoveToWindow` / `layoutSubviews`。好处：
+**不依赖 CydiaSubstrate / ElleKit 的 `%hook`**，用 Objective-C runtime 直接 swizzle。核心四点：
 
-- 同一份 dylib，**两种装法都能跑**：
-  - 作为 **deb 装进 Dopamine（Sileo）**，由 ElleKit 注入抖音进程；
-  - 用 **TrollStore / TrollFools 直接注入抖音 IPA**（无需越狱运行时）。
-- 少一层 substrate 依赖 → **崩溃面更小、加载更快**。
+1. **悬浮药丸重构**：底栏自动缩成"左右留白 + 抬高 + 药丸圆角 + 独立阴影"的悬浮条；
+2. **定向 Hook**：放弃全局 `layoutSubviews` Hook，只对已套玻璃的类做定向 Hook（性能更优，不拖慢抖音滑动）；
+3. **稳定磨砂**：底层用 `UIVisualEffectView`（App 进程内稳定），不再依赖 `CABackdropLayer`/`CAFilter`（那套在第三方 App 内会退化）；自绘对角线高光 + 顶部亮边保留；
+4. **深度清底 + 层级正确**：自动隐藏铺满的深色渐变/纯色底/背景图，玻璃不被黑底盖住。
+
+同一份 dylib **两种装法都能跑**：
+- 作为 **deb 装进 Dopamine（Sileo）**，由 ElleKit 注入抖音进程；
+- 用 **TrollStore / TrollFools 直接注入抖音 IPA**（无需越狱运行时）。
+
+## 配置（`/var/mobile/Library/Preferences/com.dy.liquidglass.plist`）
+
+| Key | 默认 | 说明 |
+|---|---|---|
+| `Enabled` | YES | 总开关 |
+| `Debug` | YES | 调试日志 + 玻璃红框（确认命中后改 NO 去红框） |
+| `ShowClassTag` | YES | 玻璃视图上叠加类名红色小标签（截图即可拿到抖音真实类名） |
+| `Floating` | YES | 底栏悬浮药丸开关 |
+| `FloatMargin` | 16 | 悬浮左右留白(pt) |
+| `FloatLift` | 12 | 悬浮距底抬高(pt) |
+| `FloatCornerRadius` | -1 | 悬浮圆角（-1=高度一半药丸） |
+| `BlurStyle` | 59 | 磨砂样式（59=SystemThinMaterialDark） |
+| `Gloss` | 0.7 | 高光强度 0~1 |
+| `Heuristics` | YES | 几何启发式（底栏/顶部导航/右侧按钮） |
+| `TargetSubstrings` | 内置 | 类名子串白名单（可用它精准收窄命中） |
+| `ExcludedClasses` | 空 | 排除类名子串 |
 
 ## 效果边界（重要，请务必理解）
 
 | 能力 | 是否支持 | 说明 |
 |---|---|---|
-| 磨砂玻璃（实时背景模糊） | ✅ | `CABackdropLayer` + 多层 `CAFilter`（模糊+饱和度+亮度） |
-| 高光渐变 / 圆角 / 玻璃淡色底 | ✅ | 与 LiquidAss 同款 specular 思路 + 内容可读性优化 |
+| 磨砂玻璃（实时背景模糊） | ✅ | `UIVisualEffectView`（App 内稳定） |
+| 高光渐变 / 圆角 / 玻璃淡色底 / 悬浮药丸 | ✅ | 自绘 specular + 边缘亮边 + 悬浮重构 |
 | 折射 / 色散（iOS26 液态玻璃签名效果） | ❌ | 那是 backboardd 渲染服务的自定义 Metal 着色器，App 进程内无入口 |
 
 即：做出来是"**磨砂液态玻璃风格**"，不是逐像素折射/色散。这是 App 进程内能达到的效果上限。
@@ -30,9 +50,9 @@
 
 ```
 DouyinLiquidGlass/
-├── Tweak.x                  # 主入口：runtime swizzle + 命中路由（无 substrate）
-├── DYGlassView.h/.m         # 玻璃视图（CABackdropLayer + 滤镜链 + 高光 + 淡色底）
-├── DYGlassInjector.h/.m     # 玻璃注入 / 几何同步 / 移除 / 调试日志
+├── Tweak.x                  # 主入口：轻量 didMoveToWindow 发现 + 命中路由（无 substrate）
+├── DYGlassView.h/.m         # 玻璃视图（UIVisualEffectView 磨砂 + 自绘高光 + 淡色底）
+├── DYGlassInjector.h/.m     # 注入/深度清底/悬浮重构/定向Hook/类名标签/移除
 ├── DYPrefsSupport.h/.m      # 偏好读取 + 命中判定缓存 + 热更新
 ├── Makefile / control / DouyinLiquidGlass.plist
 └── Prefs/                   # 设置面板（preferenceloader，暂缓编译）

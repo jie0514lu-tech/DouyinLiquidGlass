@@ -1,13 +1,15 @@
 // DouyinLiquidGlass - 抖音 App 内液态玻璃插件（主入口）
-// 思路来源：winaviation-tweaks/liquidass（借鉴其"玻璃宿主路由"机制：
-//   把宿主控件替换成 CABackdropLayer 玻璃层 + 高光 + 圆角）
+// 思路来源：winaviation-tweaks/liquidass（借鉴其"玻璃宿主路由 + 自绘高光"思路）
 //
-// 架构说明（0.2.0 重要升级）：
-//   本版本不依赖 CydiaSubstrate / ElleKit 的 %hook，改用 Objective-C runtime
-//   直接 swizzle UIView。因此同一份 dylib 两种装法都能跑：
-//     - 作为 deb 装进 Dopamine（Sileo），由 ElleKit 注入抖音进程；
-//     - 用 TrollStore / TrollFools 直接注入抖音 IPA（无需越狱运行时）。
-//   两条路都不引入 substrate 依赖 → 降低崩溃面、加载更快。
+// v0.5 架构（针对真机反馈重构）：
+//  1) 悬浮重构：底栏缩成"悬浮药丸"（左右留白、抬高、圆角、独立阴影）
+//  2) 放弃全局 layoutSubviews Hook → 只对已套玻璃的类做定向 Hook（性能更优）
+//  3) 磨砂底改用 UIVisualEffectView（App 进程内稳定），自绘高光保留
+//  4) 深度清理黑色背景层 + 玻璃层级正确（背景之上、内容之下）
+//  5) 类名调试标签：被套玻璃的视图屏幕显示类名（截图即得真实类名）
+//
+// 不依赖 CydiaSubstrate / ElleKit 的 %hook，纯 runtime swizzle →
+// 同一 dylib：Sileo(Dopamine) 与 TrollFools(巨魔) 两条路都能加载。
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -15,49 +17,48 @@
 #import "DYGlassInjector.h"
 #import "DYPrefsSupport.h"
 
-#pragma mark - 命中判定（速度优先：类名缓存 + 几何启发式）
+#pragma mark - 命中判定（返回命中类别）
 
-static BOOL DYShouldHandleView(UIView *v) {
-    if (!v || !v.window) return NO;
-    if (!DYGlobalEnabled()) return NO;
+// 0=未命中  1=类名  2=底栏启发式  3=顶部导航启发式  4=右侧按钮启发式
+static NSInteger DYHitKind(UIView *v) {
+    if (!v || !v.window) return 0;
+    if (!DYGlobalEnabled()) return 0;
 
-    // 关键防线：绝不能给玻璃层自己再套玻璃（否则无限递归崩溃）
-    if ([v isKindOfClass:[DYGlassView class]]) return NO;
+    // 关键防线：绝不能给玻璃层/阴影/标签自己再套玻璃（否则递归崩溃）
+    if (DYIsInternalView(v)) return 0;
 
     NSString *cls = NSStringFromClass(v.class);
-    if (!cls.length) return NO;
+    if (!cls.length) return 0;
 
     NSInteger decision = DYClassDecision(cls);
     if (decision == 1) {
         if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(类名): %@", cls);
-        return YES;   // 类名命中（白名单/子串）
+        return 1;   // 类名命中（白名单/子串）
     }
-    if (decision == -1) return NO;   // 被排除，连启发式也不看
+    if (decision == -1) return 0;   // 被排除，连启发式也不看
 
     // 类名未命中 → 几何启发式（底部栏 / 顶部导航 / 右侧悬浮按钮）
     if (DYHeuristicsEnabled()) {
         if (DYHeuristicBottomBar(v)) {
             if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(底栏启发式): %@", cls);
-            return YES;
+            return 2;
         }
         if (DYHeuristicTopBar(v)) {
             if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(顶部导航启发式): %@", cls);
-            return YES;
+            return 3;
         }
         if (DYHeuristicSideButton(v)) {
             if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(右侧按钮启发式): %@", cls);
-            return YES;
+            return 4;
         }
     }
-
-    return NO;
+    return 0;
 }
 
-#pragma mark - 运行时 Swizzle（不依赖 substrate）
+#pragma mark - 轻量全局入口（只 Hook didMoveToWindow，每视图一次，成本极低）
 
 @interface UIView (DouyinLiquidGlass)
 - (void)dy_didMoveToWindow;
-- (void)dy_layoutSubviews;
 @end
 
 @implementation UIView (DouyinLiquidGlass)
@@ -67,23 +68,10 @@ static BOOL DYShouldHandleView(UIView *v) {
     [self dy_didMoveToWindow];
     if (!self.window) return;
     @try {
-        if (DYShouldHandleView(self)) {
-            DYApplyGlassToView(self);
-        }
+        NSInteger kind = DYHitKind(self);
+        if (kind > 0) DYApplyGlassToView(self, kind);
     } @catch (__unused NSException *e) {
         // 任何异常都吞掉：插件可以无效果，但绝不能让抖音闪退
-    }
-}
-
-- (void)dy_layoutSubviews {
-    [self dy_layoutSubviews];
-    if (!self.window) return;
-    @try {
-        if (DYShouldHandleView(self)) {
-            DYSyncGlassGeometry(self);
-        }
-    } @catch (__unused NSException *e) {
-        // 同上：静默失败，不影响原布局
     }
 }
 
@@ -96,15 +84,10 @@ static void DYInitialize(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         Class uiview = [UIView class];
-
-        // 交换 didMoveToWindow / layoutSubviews（幂等，只换一次）
         Method m1 = class_getInstanceMethod(uiview, @selector(didMoveToWindow));
         Method m2 = class_getInstanceMethod(uiview, @selector(dy_didMoveToWindow));
-        if (m1 && m2) method_exchangeImplementations(m1, m2);
-
-        Method m3 = class_getInstanceMethod(uiview, @selector(layoutSubviews));
-        Method m4 = class_getInstanceMethod(uiview, @selector(dy_layoutSubviews));
-        if (m3 && m4) method_exchangeImplementations(m3, m4);
+        BOOL ok = (m1 && m2);
+        if (ok) method_exchangeImplementations(m1, m2);
 
         // 设置/plist 改动（com.dy.liquidglass/Reload）后整体重刷
         DYObserveReload(^{
@@ -113,10 +96,8 @@ static void DYInitialize(void) {
         });
 
         if (DYDebugEnabled()) {
-            BOOL swz = (m1 && m2 && m3 && m4);
-            NSLog(@"[DouyinLiquidGlass] 插件已加载: UIView swizzle=%@, CABackdropLayer=%@",
-                  swz ? @"OK" : @"FAIL",
-                  NSClassFromString(@"CABackdropLayer") ? @"可用" : @"不可用");
+            NSLog(@"[DouyinLiquidGlass] 插件已加载 v0.5: didMoveToWindow=%@, 磨砂=UIVisualEffectView",
+                  ok ? @"OK" : @"FAIL");
         }
     });
 }

@@ -114,6 +114,31 @@ BOOL DYHeuristicsEnabled(void) {
     return DYBool(@"Heuristics", YES);
 }
 
+BOOL DYFloatingEnabled(void) {
+    return DYBool(@"Floating", YES);
+}
+
+CGFloat DYFloatingMargin(void) {
+    return DYFloat(@"FloatMargin", 16.0);
+}
+
+CGFloat DYFloatingLift(void) {
+    return DYFloat(@"FloatLift", 12.0);
+}
+
+CGFloat DYFloatingCornerRadius(void) {
+    return DYFloat(@"FloatCornerRadius", -1.0); // <0 药丸（高度一半）
+}
+
+BOOL DYShowClassTag(void) {
+    return DYBool(@"ShowClassTag", YES);
+}
+
+UIBlurEffectStyle DYBlurStyle(void) {
+    // 默认 59 = UIBlurEffectStyleSystemThinMaterialDark（暗色薄磨砂，视频背景上最像液态玻璃）
+    return (UIBlurEffectStyle)DYFloat(@"BlurStyle", 59.0);
+}
+
 BOOL DYIsExactTarget(NSString *className) {
     if (!className.length) return NO;
     return [DYStrings(@"TargetClasses") containsObject:className];

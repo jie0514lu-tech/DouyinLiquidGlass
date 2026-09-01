@@ -35,6 +35,24 @@ CGFloat DYCornerRadius(void);
 /// 是否启用底部横条启发式
 BOOL DYHeuristicsEnabled(void);
 
+/// 悬浮药丸开关（底栏缩边 + 抬高 + 圆角 + 阴影）
+BOOL DYFloatingEnabled(void);
+
+/// 悬浮左右留白（pt）
+CGFloat DYFloatingMargin(void);
+
+/// 悬浮距底抬高（pt）
+CGFloat DYFloatingLift(void);
+
+/// 悬浮圆角（pt），<0 表示高度一半（药丸）
+CGFloat DYFloatingCornerRadius(void);
+
+/// 是否在屏幕上叠加类名调试标签（截图即得真实类名）
+BOOL DYShowClassTag(void);
+
+/// 磨砂样式（UIBlurEffectStyle，默认 59 = SystemThinMaterialDark）
+UIBlurEffectStyle DYBlurStyle(void);
+
 /// 精确类名白名单命中
 BOOL DYIsExactTarget(NSString *className);
 
