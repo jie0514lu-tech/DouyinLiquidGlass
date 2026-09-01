@@ -95,10 +95,11 @@ static BOOL DYLayerIsDark(CAGradientLayer *g) {
     return YES;
 }
 
-// 深度清理背景（0.5.6 保守版）：
-//  - 目标自身背景色清掉；
-//  - 图层层：只隐藏"铺满的深色渐变/不透明纯色底/背景图"；
-//  - 子视图层：只隐藏"铺满、且类名像背景/含 Blur、且内部无任何图标/文字"的视图。
+// 深度清理背景（0.5.9 暴力剥离版）：
+//  - 目标自身背景色 + layer 背景色清掉；
+//  - 图层层：隐藏"铺满的深色渐变 / 不透明纯色底 / 背景图 / 半透明暗色大块"；
+//  - 子视图层：★无视尺寸★，只要类名像背景/含 Blur/Gradient 且内部无任何图标/文字，
+//    一律隐藏——底栏内覆盖安全区的原生 BlurView（比容器还大）这次必定被撕掉。
 //  ★ 任何含 UIImageView/UILabel 的子视图一律不隐藏（头像、点赞图标、标签绝不误伤）。
 static void DYDeepCleanBackground(UIView *target, DYGlassView *glass) {
     // 1) 目标自身背景色（记住以便移除时还原）
@@ -107,21 +108,24 @@ static void DYDeepCleanBackground(UIView *target, DYGlassView *glass) {
         objc_setAssociatedObject(target, kBgColorKey, bg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         target.backgroundColor = [UIColor clearColor];
     }
+    // layer 级背景色也清掉（原生有时把背景画在 layer.backgroundColor 上）
+    target.layer.backgroundColor = [UIColor clearColor].CGColor;
 
-    // 2) 图层层：铺满的深色渐变 / 纯色底 / 背景图
+    // 2) 图层层：铺满的深色渐变 / 纯色底 / 背景图 / 暗色大块
     NSMutableArray *hiddenLayers = [NSMutableArray array];
     for (CALayer *sl in [target.layer.sublayers copy]) {
         if (sl.hidden || sl == glass.layer) continue;
         CGRect slf = sl.frame;
-        if (slf.size.width  < target.bounds.size.width  * 0.9 ||
-            slf.size.height < target.bounds.size.height * 0.9) continue;
+        BOOL fillsBig = slf.size.width  >= target.bounds.size.width  * 0.5 &&
+                        slf.size.height >= target.bounds.size.height * 0.5;
+        if (!fillsBig) continue;
         BOOL shouldHide = NO;
         if ([sl isKindOfClass:[CAGradientLayer class]]) {
             shouldHide = DYLayerIsDark((CAGradientLayer *)sl);
         } else {
             if (sl.contents != nil) shouldHide = YES;   // 背景图
-            else if (sl.backgroundColor && CGColorGetAlpha(sl.backgroundColor) > 0.9)
-                shouldHide = YES;                       // 不透明纯色底
+            else if (sl.backgroundColor && CGColorGetAlpha(sl.backgroundColor) > 0.5)
+                shouldHide = YES;                       // 半透明以上暗色/纯色大块
         }
         if (shouldHide) {
             sl.hidden = YES;
@@ -132,21 +136,39 @@ static void DYDeepCleanBackground(UIView *target, DYGlassView *glass) {
         objc_setAssociatedObject(target, kHiddenLayersKey, hiddenLayers,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    // 3) 子视图层：铺满 + 类名像背景/含Blur + 无图标文字 → 隐藏
+    // 3) 子视图层：★无视尺寸★，类名像背景/含Blur/Gradient 且无图标文字 → 隐藏。
+    //    说明：底栏内原生 AWENormalModeTabBarBlurView 为覆盖底部安全区，尺寸比容器
+    //    还大，旧版"铺满≥90%"的尺寸校验漏删了它 → 黑色模糊层挡在玻璃上方。
+    //    现在只要类名带强背景特征（Blur/Background/Gradient 等）就直接撕掉；
+    //    "Bg/BG/Wrapper" 等弱特征仍需 ≥50% 尺寸，防误删小徽标底。
     NSMutableArray *hiddenViews = [NSMutableArray array];
     for (UIView *sub in [target.subviews copy]) {
         if (sub == glass) continue;
         // ★ 免死金牌：含图标/文字的视图绝不隐藏（头像、点赞图标、tab 图标与文字）
         if (DYHasImageOrLabelDeep(sub)) continue;
 
-        CGRect sb = sub.frame;
-        BOOL fills = sb.size.width  >= target.bounds.size.width  * 0.9 &&
-                     sb.size.height >= target.bounds.size.height * 0.9;
-        if (!fills) continue;
-
         NSString *cls = NSStringFromClass(sub.class);
-        BOOL bgLike = DYShouldHideSubviewClass(cls) || [cls containsString:@"Blur"];
-        if (!bgLike) continue;
+        if (!cls.length) continue;
+
+        BOOL strongBg = [cls containsString:@"Blur"] ||
+                        [cls containsString:@"Background"] ||
+                        [cls containsString:@"BarBackground"] ||
+                        [cls containsString:@"BottomBg"] ||
+                        [cls containsString:@"BackView"] ||
+                        [cls containsString:@"Gradient"];
+        BOOL weakBg = [cls containsString:@"BarBg"] ||
+                      [cls containsString:@"Bg"] ||
+                      [cls containsString:@"BG"] ||
+                      [cls containsString:@"Wrapper"];
+        if (strongBg) {
+            // 强背景特征：无视尺寸直接隐藏
+        } else if (weakBg) {
+            CGRect sb = sub.frame;
+            if (sb.size.width  < target.bounds.size.width  * 0.5 ||
+                sb.size.height < target.bounds.size.height * 0.5) continue;
+        } else {
+            continue;
+        }
         sub.hidden = YES;
         [hiddenViews addObject:sub];
     }
@@ -203,10 +225,12 @@ static void DYApplyFloating(UIView *target, DYGlassView *glass) {
         CGFloat margin = DYFloatingMargin();
         CGFloat pillW = b.size.width - margin * 2.0;
         if (pillW < 80.0) return;
-        CGFloat pillH = b.size.height - 8.0;   // 上下各留 4pt，看起来像悬浮胶囊
+        // v0.5.9：胶囊固定高度并贴容器最上方（pillY=0），不再垂直居中——
+        // 居中式会让胶囊下缘逼近容器底部，遮住抖音视频底部细线进度条。
+        CGFloat pillH = MIN(b.size.height - 8.0, 46.0);
         if (pillH < 16.0) pillH = b.size.height;
         CGFloat pillX = margin;
-        CGFloat pillY = (b.size.height - pillH) * 0.5; // 垂直居中
+        CGFloat pillY = 0.0;                              // 贴容器顶部
         CGRect pillFrame = CGRectMake(pillX, pillY, pillW, pillH);
         CGFloat radius = DYFloatingCornerRadius();
         if (radius < 0.0) radius = pillH * 0.5;  // 药丸：高度一半

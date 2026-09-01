@@ -15,7 +15,8 @@
 3. **稳定磨砂**：`UIVisualEffectView`（App 进程内稳定），自绘对角线高光 + 顶部亮边；右侧按钮/头像方形自动转**圆形胶囊**；
 4. **保守清底 + 层级正确**：只隐藏"铺满且类名像背景/含 Blur、且内部无任何图标/文字"的视图；**任何含 UIImageView/UILabel 的子视图一律不隐藏**（头像/图标绝不误伤）；玻璃被原生重排移除时自动钉回底层。
 
-**诊断开关写死关闭**：Debug / ShowClassTag / Heuristics 一律 `return NO`，**无视本地残留旧 plist**（此前真机红框/标签一直出现，是诊断时手动改过 plist 的残留值在作祟）。
+**诊断开关写死关闭 + 自愈迁移**：`Debug`/`ShowClassTag` 不再读旧 plist（防止残留值污染），改用**全新键 `DiagnosticMode`**（默认关，需要抓真实类名时手动设 YES）。v0.5.8 起**首次加载自动清理**旧版残留的危险配置键并强制 `Enabled=YES`——即使手机里留着脏 plist，也不会再导致红框/标签/全无玻璃。
+**几何启发式 v0.5.9 恢复**：右侧按钮类名抓不准（40.x 一直在变），恢复**右侧几何启发式**（右缘 30~80pt 小方块 + 垂直中段 + 含图标护栏）兜底；底部/顶部仍走精准类名白名单，不再用几何盲猜。
 
 同一份 dylib **两种装法都能跑**：
 - 作为 **deb 装进 Dopamine（Sileo）**，由 ElleKit 注入抖音进程；
@@ -25,18 +26,17 @@
 
 | Key | 默认 | 说明 |
 |---|---|---|
-| `Enabled` | YES | 总开关 |
-| `Debug` | **NO（写死）** | 调试红框/日志（不再读配置，防旧 plist 污染） |
-| `ShowClassTag` | **NO（写死）** | 红色类名标签（不再读配置） |
-| `Heuristics` | **NO（写死）** | 几何盲猜（不再读配置，防全屏误伤） |
+| `Enabled` | YES（首启强制） | 总开关 |
+| `DiagnosticMode` | NO | 全新诊断键：设 YES 显示红色类名标签（截图抓真实类名）；用完设回 NO |
 | `Floating` | YES | 底栏悬浮胶囊开关 |
+| `SideHeuristic` | YES | 右侧按钮几何兜底（右缘 30~80pt 小方块+中段+含图标护栏），类名抓准后可改 NO |
 | `FloatMargin` | 16 | 胶囊左右内缩(pt) |
 | `FloatCornerRadius` | -1 | 胶囊圆角（-1=高度一半药丸） |
 | `BlurStyle` | 59 | 磨砂样式（59=SystemThinMaterialDark） |
 | `Gloss` | 0.7 | 高光强度 0~1 |
-| `TargetClasses` | 内置 | 精确类名白名单：AWEFeedTopBarContainer（顶部导航）/ AWENormalModeTabBar（底部栏） |
-| `TargetSubstrings` | 内置 | 右侧按钮猜测类名（AWEFeedLikeButton 等），**必须小尺寸+含图标才生效** |
-| `ExcludedClasses` | 内置 | 排除：AWEFeedViewCell / AWEGradientView |
+| `TargetClasses` | 内置 | 精确类名白名单（**并集**：内置 AWEFeedTopBarContainer / AWENormalModeTabBar 永远生效，自定义只追加） |
+| `TargetSubstrings` | 内置 | 右侧按钮猜测类名（**并集**，必须小尺寸+含图标才生效） |
+| `ExcludedClasses` | 内置 | 排除名单（**并集**：AWEFeedViewCell / AWEGradientView 永远生效） |
 
 ## 效果边界（重要，请务必理解）
 

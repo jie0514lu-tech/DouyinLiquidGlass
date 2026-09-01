@@ -56,6 +56,48 @@ static NSArray<NSString *> *DYStrings(NSString *key) {
     return @[];
 }
 
+// ===== v0.5.8 自愈迁移 =====
+// 旧版本调试过程中，plist 被手动改过 Debug/ShowClassTag/Heuristics/TargetClasses 等，
+// 残留值导致：红框常驻 / 标签乱显示 / 全屏误套 / 白名单被覆盖而"全无玻璃"。
+// 插件首次加载时调用一次：清掉这些危险残留键 + 确保总开关为开。
+// 白名单已改为并集（内置永远生效），此迁移是"双保险"彻底清场。
+void DYResetStalePrefs(void) {
+    @try {
+        NSString *path = DYPrefsPath();
+        NSMutableDictionary *d =
+            [NSMutableDictionary dictionaryWithContentsOfFile:path] ?: [NSMutableDictionary dictionary];
+        BOOL changed = NO;
+
+        NSArray<NSString *> *staleKeys = @[
+            @"Debug",            // 旧诊断红框开关（已废弃，改用 DiagnosticMode）
+            @"ShowClassTag",     // 旧类名标签开关（已废弃，改用 DiagnosticMode）
+            @"Heuristics",       // 旧几何盲猜总开关（已写死关闭）
+            @"TargetClasses",    // 旧白名单覆盖（会挤掉内置核心目标，已改并集）
+            @"TargetSubstrings", // 旧子串覆盖（同上）
+            @"ExcludedClasses",  // 旧排除覆盖（同上）
+            @"BottomHeuristic", @"TopHeuristic", @"SideHeuristic", // 旧启发式（已写死关闭）
+        ];
+        for (NSString *k in staleKeys) {
+            if (d[k]) {
+                [d removeObjectForKey:k];
+                changed = YES;
+            }
+        }
+        // 总开关必须为开——残留 Enabled=NO 会把整个插件关掉（表现就是"全无玻璃"）
+        NSNumber *en = d[@"Enabled"];
+        if (![en isKindOfClass:[NSNumber class]] || ![en boolValue]) {
+            d[@"Enabled"] = @YES;
+            changed = YES;
+        }
+        if (changed) {
+            [d writeToFile:path atomically:YES];
+            sCache = nil; // 让缓存重新读取
+        }
+    } @catch (__unused NSException *e) {
+        // 自愈失败不影响主流程（并集白名单本身已免疫）
+    }
+}
+
 #pragma mark - 对外接口
 
 BOOL DYGlobalEnabled(void) {
@@ -63,10 +105,10 @@ BOOL DYGlobalEnabled(void) {
 }
 
 BOOL DYDebugEnabled(void) {
-    // 0.5.6 起彻底写死为 NO（无视本地残留旧 plist）。
-    // 之前真机上红框一直出现，就是因为诊断时手动把 plist 的 Debug 改过 YES，
-    // 残留配置压过了代码默认值。诊断开关不再读配置。
-    return NO;
+    // v0.5.6 起不再读旧的 Debug 键（曾被残留值污染成 YES 导致红框常驻）。
+    // v0.5.8 改用全新键 DiagnosticMode（历史上从未设置过，无残留污染风险）：
+    //   需要抓真实类名/看命中时，在 plist 里把 DiagnosticMode 设为 YES 即可。
+    return DYBool(@"DiagnosticMode", NO);
 }
 
 NSInteger DYClassDecision(NSString *className) {
@@ -114,10 +156,10 @@ CGFloat DYCornerRadius(void) {
 }
 
 BOOL DYHeuristicsEnabled(void) {
-    // 0.5.6 起彻底关闭几何盲猜（无视本地残留旧 plist）：
-    // 底部/顶部/右侧启发式全部不跑，杜绝 AWEFeedViewCell 整屏误套。
-    // 命中只走精确类名白名单 + 带护栏的子串白名单。
-    return NO;
+    // v0.5.9：重新启用几何启发式（仅右侧按钮 SideHeuristic 默认 YES，底部/顶部默认 NO）。
+    // 右侧点赞/评论/收藏/分享类名抓不准（40.x 一直在变），几何识别右缘小方块是
+    // 唯一稳妥路径；配合 DYGlassInjector 的"含图标+小尺寸"护栏，不会误盖大容器。
+    return YES;
 }
 
 BOOL DYFloatingEnabled(void) {
@@ -143,8 +185,8 @@ CGFloat DYFloatingCornerRadius(void) {
 }
 
 BOOL DYShowClassTag(void) {
-    // 0.5.6 起彻底写死为 NO（无视本地残留旧 plist），不再显示红色类名标签。
-    return NO;
+    // v0.5.8：同 DYDebugEnabled，走全新键 DiagnosticMode（默认关，无残留污染）。
+    return DYBool(@"DiagnosticMode", NO);
 }
 
 UIBlurEffectStyle DYBlurStyle(void) {
@@ -163,14 +205,18 @@ static NSArray<NSString *> *DYTargetClasses(void) {
         sDefaultTargetClasses = @[
             @"AWEFeedTopBarContainer", // 顶部导航容器（直播/团购/热点…）已核实
             @"AWENormalModeTabBar",    // 底部 tab 栏容器（会被悬浮成药丸）已核实
-            // 注意：不再加入猜测的右侧容器类名（AWEFeedInteractView 等）——
-            // 实测会匹配到大容器、玻璃盖住头像/点赞/评论/分享图标。
-            // 右侧按钮改由 SideHeuristic 精确几何判定（且必须含图标）。
         ];
     }
+    // v0.5.8：并集。内置白名单永远生效，plist 自定义只能"追加"不能"覆盖"。
+    // 修复：旧版残留的 TargetClasses 会整体替换默认名单，把 AWENormalModeTabBar 等
+    // 核心目标挤掉 → 底部/顶部全无玻璃。现在即使 plist 有脏值也不影响核心命中。
     NSArray *custom = DYStrings(@"TargetClasses");
-    if (custom.count) return custom; // 自定义优先
-    return sDefaultTargetClasses;
+    if (!custom.count) return sDefaultTargetClasses;
+    NSMutableArray *all = [sDefaultTargetClasses mutableCopy];
+    for (NSString *c in custom) {
+        if (c.length && ![all containsObject:c]) [all addObject:c];
+    }
+    return all;
 }
 
 BOOL DYIsExactTarget(NSString *className) {
@@ -194,9 +240,14 @@ static NSArray<NSString *> *DYTargetSubstrings(void) {
             @"AWEFeedAvatarView",       // 右侧：头像（猜测）
         ];
     }
+    // v0.5.8：并集，同 DYTargetClasses（内置猜测永远生效，自定义只追加）
     NSArray *custom = DYStrings(@"TargetSubstrings");
-    if (custom.count) return custom; // 自定义优先
-    return sDefaultSubstrings;
+    if (!custom.count) return sDefaultSubstrings;
+    NSMutableArray *all = [sDefaultSubstrings mutableCopy];
+    for (NSString *c in custom) {
+        if (c.length && ![all containsObject:c]) [all addObject:c];
+    }
+    return all;
 }
 
 BOOL DYMatchesTargetSubstring(NSString *className) {
@@ -218,9 +269,14 @@ static NSArray<NSString *> *DYExcludedSubstrings(void) {
             @"AWEGradientView", // 视频底部文字渐变（不是 tab 栏）
         ];
     }
+    // v0.5.8：并集，同 DYTargetClasses（内置排除永远生效，自定义只追加）
     NSArray *custom = DYStrings(@"ExcludedClasses");
-    if (custom.count) return custom; // 自定义优先
-    return sDefaultExcluded;
+    if (!custom.count) return sDefaultExcluded;
+    NSMutableArray *all = [sDefaultExcluded mutableCopy];
+    for (NSString *c in custom) {
+        if (c.length && ![all containsObject:c]) [all addObject:c];
+    }
+    return all;
 }
 
 BOOL DYIsExcluded(NSString *className) {
@@ -285,22 +341,20 @@ BOOL DYHeuristicTopBar(UIView *view) {
     return YES;
 }
 
-// 右侧悬浮按钮：30~110pt 方形、靠右边缘(<70pt)、垂直中段
+// 右侧悬浮按钮：30~80pt 小方块、靠右边缘(≤80pt)、垂直中段。
+// v0.5.9 收紧到 30~80（此前 30~110 偶发命中右缘大容器，玻璃盖住整列图标）。
 BOOL DYHeuristicSideButton(UIView *view) {
-    // 0.5.3 保留（默认 YES）：点赞/评论/收藏/分享的类名尚未抓到，
-    // 这是目前唯一能覆盖它们的路径。判定精确（右缘小方块+垂直中段），
-    // 误伤面小。抓到真实类名后可把 SideHeuristic 改 NO 走白名单。
     if (!DYBool(@"SideHeuristic", YES)) return NO;
     if (!view.window) return NO;
     CGRect f = view.bounds;
-    if (f.size.width < 30.0 || f.size.width > 110.0) return NO;
-    if (f.size.height < 30.0 || f.size.height > 110.0) return NO;
+    if (f.size.width < 30.0 || f.size.width > 80.0) return NO;
+    if (f.size.height < 30.0 || f.size.height > 80.0) return NO;
     CGRect wf = [view convertRect:view.bounds toView:view.window];
     CGFloat winW = view.window.bounds.size.width;
     CGFloat winH = view.window.bounds.size.height;
-    if (CGRectGetMaxX(wf) < winW - 70.0) return NO;   // 靠右边缘
+    if (CGRectGetMaxX(wf) < winW - 80.0) return NO;   // 靠右边缘
     CGFloat midY = CGRectGetMidY(wf);
-    if (midY < 200.0 || midY > winH - 200.0) return NO; // 垂直中段
+    if (midY < 200.0 || midY > winH - 150.0) return NO; // 垂直中段
     return YES;
 }
 

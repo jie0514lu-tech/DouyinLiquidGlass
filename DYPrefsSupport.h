@@ -77,6 +77,11 @@ BOOL DYHeuristicSideButton(UIView *view);
 /// 设置变化回调（Darwin 通知 com.dy.liquidglass/Reload）
 void DYObserveReload(void (^handler)(void));
 
+/// v0.5.8 自愈迁移：清掉旧版残留的危险配置键（Debug/ShowClassTag/Heuristics/
+/// TargetClasses/TargetSubstrings/ExcludedClasses/各启发式）并确保 Enabled=YES。
+/// 插件加载时调用一次即可。
+void DYResetStalePrefs(void);
+
 /// 清空缓存（重刷时调用）
 void DYInvalidateCaches(void);
 

@@ -91,6 +91,9 @@ __attribute__((constructor))
 static void DYInitialize(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        // v0.5.8：首启自愈——清掉旧版残留的危险配置（红框/标签/盲猜/白名单覆盖/Enabled=NO）
+        DYResetStalePrefs();
+
         Class uiview = [UIView class];
         Method m1 = class_getInstanceMethod(uiview, @selector(didMoveToWindow));
         Method m2 = class_getInstanceMethod(uiview, @selector(dy_didMoveToWindow));
