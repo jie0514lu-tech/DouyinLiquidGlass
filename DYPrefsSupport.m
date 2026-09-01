@@ -187,6 +187,33 @@ BOOL DYHeuristicBottomBar(UIView *view) {
     return fabs(CGRectGetMaxY(wf) - winH) < 180.0;
 }
 
+// 顶部导航栏：宽 >=250、高 20~100、高不超过宽的一半、位于窗口顶部区域
+BOOL DYHeuristicTopBar(UIView *view) {
+    if (!view.window) return NO;
+    CGRect f = view.bounds;
+    if (f.size.width < 250.0 || f.size.height < 20.0 || f.size.height > 100.0) return NO;
+    if (f.size.height > f.size.width * 0.5) return NO;
+    CGRect wf = [view convertRect:view.bounds toView:view.window];
+    CGFloat minY = CGRectGetMinY(wf);
+    if (minY < -10.0 || minY > 220.0) return NO;
+    return YES;
+}
+
+// 右侧悬浮按钮：30~110pt 方形、靠右边缘(<70pt)、垂直中段
+BOOL DYHeuristicSideButton(UIView *view) {
+    if (!view.window) return NO;
+    CGRect f = view.bounds;
+    if (f.size.width < 30.0 || f.size.width > 110.0) return NO;
+    if (f.size.height < 30.0 || f.size.height > 110.0) return NO;
+    CGRect wf = [view convertRect:view.bounds toView:view.window];
+    CGFloat winW = view.window.bounds.size.width;
+    CGFloat winH = view.window.bounds.size.height;
+    if (CGRectGetMaxX(wf) < winW - 70.0) return NO;   // 靠右边缘
+    CGFloat midY = CGRectGetMidY(wf);
+    if (midY < 200.0 || midY > winH - 200.0) return NO; // 垂直中段
+    return YES;
+}
+
 // Darwin 通知回调必须是静态 C 函数（block 不能隐式转换成函数指针，clang 会报错）
 static void DYReloadNotify(CFNotificationCenterRef center, void *observer,
                            CFStringRef name, const void *object,

@@ -50,6 +50,12 @@ BOOL DYShouldHideSubviewClass(NSString *className);
 /// 底部横条启发式：宽 > 2*高、贴窗口底部、宽 > 200pt
 BOOL DYHeuristicBottomBar(UIView *view);
 
+/// 顶部导航栏启发式：宽 >=250、高 20~100、位于窗口顶部区域
+BOOL DYHeuristicTopBar(UIView *view);
+
+/// 右侧悬浮按钮启发式：30~110pt 方形、靠右边缘、垂直中段
+BOOL DYHeuristicSideButton(UIView *view);
+
 /// 设置变化回调（Darwin 通知 com.dy.liquidglass/Reload）
 void DYObserveReload(void (^handler)(void));
 

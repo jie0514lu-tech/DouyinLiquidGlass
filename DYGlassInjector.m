@@ -85,6 +85,10 @@ static void DYInstallGlass(UIView *target) {
     if (DYDebugEnabled()) {
         NSLog(@"[DouyinLiquidGlass] 套玻璃: %@ (filter=%@)",
               NSStringFromClass(target.class), glass.filterType);
+        // 调试红框：不用任何工具，一眼就能看到哪些视图被套了玻璃。
+        // 确认命中正确后，把 plist 的 Debug 改为 false 即可去掉红框。
+        glass.layer.borderColor = [UIColor redColor].CGColor;
+        glass.layer.borderWidth = 1.5;
     }
 }
 

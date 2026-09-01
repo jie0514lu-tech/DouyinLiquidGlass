@@ -34,10 +34,20 @@ static BOOL DYShouldHandleView(UIView *v) {
     }
     if (decision == -1) return NO;   // 被排除，连启发式也不看
 
-    // 类名未命中 → 几何启发式（底部/悬浮大横条）
-    if (DYHeuristicsEnabled() && DYHeuristicBottomBar(v)) {
-        if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(底栏启发式): %@", cls);
-        return YES;
+    // 类名未命中 → 几何启发式（底部栏 / 顶部导航 / 右侧悬浮按钮）
+    if (DYHeuristicsEnabled()) {
+        if (DYHeuristicBottomBar(v)) {
+            if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(底栏启发式): %@", cls);
+            return YES;
+        }
+        if (DYHeuristicTopBar(v)) {
+            if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(顶部导航启发式): %@", cls);
+            return YES;
+        }
+        if (DYHeuristicSideButton(v)) {
+            if (DYDebugEnabled()) NSLog(@"[DouyinLiquidGlass] 命中(右侧按钮启发式): %@", cls);
+            return YES;
+        }
     }
 
     return NO;
