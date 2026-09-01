@@ -63,7 +63,9 @@ BOOL DYGlobalEnabled(void) {
 }
 
 BOOL DYDebugEnabled(void) {
-    return DYBool(@"Debug", YES);
+    // 0.5.3 起默认关闭：不再画红框/打日志，避免干扰正常界面。
+    // 需要诊断时把 plist 的 Debug 改成 YES 即可。
+    return DYBool(@"Debug", NO);
 }
 
 NSInteger DYClassDecision(NSString *className) {
@@ -111,6 +113,11 @@ CGFloat DYCornerRadius(void) {
 }
 
 BOOL DYHeuristicsEnabled(void) {
+    // 总开关（默认 YES）。0.5.3 起三种启发式各自独立可关：
+    //   BottomHeuristic = NO（底部宽条，误伤全屏 cell / 底部渐变）
+    //   TopHeuristic    = NO（顶部导航，误伤全屏 cell 的顶部切片）
+    //   SideHeuristic   = YES（右侧按钮：右缘 30~110pt 方形，精确，保留给
+    //                         点赞/评论/收藏/分享——它们类名尚未核实时唯一路径）
     return DYBool(@"Heuristics", YES);
 }
 
@@ -131,7 +138,8 @@ CGFloat DYFloatingCornerRadius(void) {
 }
 
 BOOL DYShowClassTag(void) {
-    return DYBool(@"ShowClassTag", YES);
+    // 0.5.3 起默认关闭。类名已经抓到，正常使用不再显示红色类名标签。
+    return DYBool(@"ShowClassTag", NO);
 }
 
 UIBlurEffectStyle DYBlurStyle(void) {
@@ -139,25 +147,38 @@ UIBlurEffectStyle DYBlurStyle(void) {
     return (UIBlurEffectStyle)DYFloat(@"BlurStyle", 59.0);
 }
 
-BOOL DYIsExactTarget(NSString *className) {
-    if (!className.length) return NO;
-    return [DYStrings(@"TargetClasses") containsObject:className];
-}
+// ===== 精准白名单（0.5.3）=====
+// 类名来自抖音 40.1.0 真机调试截图（类名标签）核实，不再靠宽泛子串瞎猜。
+// 用 plist 的 TargetClasses 可覆盖（填了自定义就以自定义为准）。
 
-// 抖音常见控件类名子串：无需 class-dump 即可命中底部栏/工具栏
-// 可用 plist 的 TargetSubstrings 覆盖（填了自定义就以自定义为准）
-static NSArray<NSString *> *sDefaultSubstrings;
+static NSArray<NSString *> *sDefaultTargetClasses;
 
-static NSArray<NSString *> *DYTargetSubstrings(void) {
-    if (!sDefaultSubstrings) {
-        sDefaultSubstrings = @[
-            @"TabBar", @"TabBars", @"BottomBar", @"BottomNav",
-            @"MainTabBar", @"ToolBar", @"BottomTab",
+static NSArray<NSString *> *DYTargetClasses(void) {
+    if (!sDefaultTargetClasses) {
+        sDefaultTargetClasses = @[
+            @"AWEFeedTopBarContainer", // 顶部导航容器（直播/团购/热点…）已核实
+            @"AWENormalModeTabBar",    // 底部 tab 栏容器（会被悬浮成药丸）已核实
+            // ↓ 以下为猜测类名（右侧点赞/评论/收藏/分享容器），未实证，
+            //   精确匹配不会误伤；若真机无效则说明类名不对，靠 SideHeuristic 几何兜底
+            @"AWEFeedInteractView",
+            @"AWEFeedInteractionView",
         ];
     }
-    NSArray *custom = DYStrings(@"TargetSubstrings");
+    NSArray *custom = DYStrings(@"TargetClasses");
     if (custom.count) return custom; // 自定义优先
-    return sDefaultSubstrings;
+    return sDefaultTargetClasses;
+}
+
+BOOL DYIsExactTarget(NSString *className) {
+    if (!className.length) return NO;
+    return [DYTargetClasses() containsObject:className];
+}
+
+// 子串匹配默认清空：之前的 "TabBar"/"BottomBar" 等宽子串会误伤
+// AWENormalModeTabBarBlurView / BadgeContainerView / AvatarView 等子视图，
+// 造成"容器+子视图"多层嵌套玻璃。精准打击不需要子串。
+static NSArray<NSString *> *DYTargetSubstrings(void) {
+    return DYStrings(@"TargetSubstrings"); // 默认空，需要时用 plist 开启
 }
 
 BOOL DYMatchesTargetSubstring(NSString *className) {
@@ -168,9 +189,25 @@ BOOL DYMatchesTargetSubstring(NSString *className) {
     return NO;
 }
 
+// ===== 排除名单（0.5.3）=====
+// 真机调试中发现会被启发式/宽匹配误套的类，一律排除。
+static NSArray<NSString *> *sDefaultExcluded;
+
+static NSArray<NSString *> *DYExcludedSubstrings(void) {
+    if (!sDefaultExcluded) {
+        sDefaultExcluded = @[
+            @"AWEFeedViewCell", // 整个视频背景单元（曾被误套整屏玻璃）
+            @"AWEGradientView", // 视频底部文字渐变（不是 tab 栏）
+        ];
+    }
+    NSArray *custom = DYStrings(@"ExcludedClasses");
+    if (custom.count) return custom; // 自定义优先
+    return sDefaultExcluded;
+}
+
 BOOL DYIsExcluded(NSString *className) {
     if (!className.length) return NO;
-    for (NSString *sub in DYStrings(@"ExcludedClasses")) {
+    for (NSString *sub in DYExcludedSubstrings()) {
         if (sub.length && [className containsString:sub]) return YES;
     }
     return NO;
@@ -201,6 +238,9 @@ BOOL DYShouldHideSubviewClass(NSString *className) {
 }
 
 BOOL DYHeuristicBottomBar(UIView *view) {
+    // 0.5.3 默认关闭：宽泛贴底判定会误伤 AWEFeedViewCell（整屏 cell）与
+    // AWEGradientView（视频底部渐变）。底部 tab 栏走精准类名白名单。
+    if (!DYBool(@"BottomHeuristic", NO)) return NO;
     if (!view.window) return NO;
     CGRect f = view.bounds;
     // 宽条：宽>=200、宽>=2×高、高>=20（高度下限排除进度条/分隔线等细条）
@@ -214,6 +254,9 @@ BOOL DYHeuristicBottomBar(UIView *view) {
 
 // 顶部导航栏：宽 >=250、高 20~100、高不超过宽的一半、位于窗口顶部区域
 BOOL DYHeuristicTopBar(UIView *view) {
+    // 0.5.3 默认关闭：AWEFeedViewCell 在 cell 创建早期 frame 是顶部细条时
+    // 会命中此判定，把整个视频背景套上玻璃。顶部导航走精准类名白名单。
+    if (!DYBool(@"TopHeuristic", NO)) return NO;
     if (!view.window) return NO;
     CGRect f = view.bounds;
     if (f.size.width < 250.0 || f.size.height < 20.0 || f.size.height > 100.0) return NO;
@@ -226,6 +269,10 @@ BOOL DYHeuristicTopBar(UIView *view) {
 
 // 右侧悬浮按钮：30~110pt 方形、靠右边缘(<70pt)、垂直中段
 BOOL DYHeuristicSideButton(UIView *view) {
+    // 0.5.3 保留（默认 YES）：点赞/评论/收藏/分享的类名尚未抓到，
+    // 这是目前唯一能覆盖它们的路径。判定精确（右缘小方块+垂直中段），
+    // 误伤面小。抓到真实类名后可把 SideHeuristic 改 NO 走白名单。
+    if (!DYBool(@"SideHeuristic", YES)) return NO;
     if (!view.window) return NO;
     CGRect f = view.bounds;
     if (f.size.width < 30.0 || f.size.width > 110.0) return NO;
